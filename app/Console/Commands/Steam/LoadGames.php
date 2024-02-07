@@ -6,6 +6,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Facades\Log;
 
 class LoadGames extends Command
 {
@@ -25,7 +26,7 @@ class LoadGames extends Command
 
     private Factory $httpClient;
 
-    private string $temporaryGamesList = './storage/app/steam';
+    private string $currentGamesListPath = './storage/app/steam';
 
     private array $genres = [];
     private array $publishers = [];
@@ -47,11 +48,32 @@ class LoadGames extends Command
             exit;
         }
 
-        $responseContent = $response->json();
-        $apps = $responseContent['applist']['apps'];
+        $steamResponse = $response->json();
+        $apps = $steamResponse['applist']['apps'];
         $jsonApps = json_encode($apps);
-        $res = file_put_contents($this->temporaryGamesList, $jsonApps);
-        $this->info('LOADED!!!');
+        $res = file_put_contents($this->currentGamesListPath, $jsonApps);
+        $this->info('Loaded.');
+    }
+
+    public function updateGames()
+    {
+        $steamGamesResponse = $this->httpClient->get(config('steam.api.games.all'))->json();
+
+        $steamGamesResponse = $steamGamesResponse['applist']['apps'];
+        $steamGamesIds = array();
+        foreach ($steamGamesResponse as $r) {
+            $steamGamesIds[] = $r['appid'];
+        }
+
+        $currentAppIds = DB::table('games')
+            ->select('steam_appid')
+            ->pluck('steam_appid')
+            ->toArray();
+        Log::info($currentAppIds);
+
+        $newAppIds = array_diff($steamGamesIds, $currentAppIds);
+
+        Log::info(count($newAppIds));
     }
 
     /**
@@ -61,6 +83,11 @@ class LoadGames extends Command
      */
     public function handle()
     {
+        // $this->loadGameList();
+        // exit;
+        // $this->updateGames();
+        // $this->info("test");
+        // exit;
 
 
         // $steep = $this->argument('steep');
@@ -69,7 +96,7 @@ class LoadGames extends Command
         //     return 0;
         // }
 
-        $gameList = file_get_contents($this->temporaryGamesList);
+        $gameList = file_get_contents($this->currentGamesListPath);
         $gameList = json_decode($gameList, true);
 
         $savedGames = DB::table('games')
@@ -89,7 +116,6 @@ class LoadGames extends Command
         $progressDb = $this->output->createProgressBar(count($gameList));
 
         foreach ($gameList as $row) {
-            // {"appid":216938,"name":"Pieterw"}
             $appId = $row['appid'];
 
             if (array_key_exists($appId, $savedGames)) {
